@@ -3,34 +3,28 @@
 #include <mutex>
 #include <queue>
 
+// Blocking queue with unlimited capacity
 template<typename T>
 class thread_safe_queue {
 public:
-    thread_safe_queue(std::size_t capacity);
+    thread_safe_queue();
     thread_safe_queue(const thread_safe_queue& queue) = delete;
     void enqueue(T item);
     void pop(T& item);
 
 private:
-    std::condition_variable empty_4 ;
-    std::condition_variable overloaded_;
+    std::condition_variable empty_;
     std::mutex mutex_;
     std::queue<T> queue_;
-    std::size_t capacity_;
 };
 
 template<typename T>
-thread_safe_queue<T>::thread_safe_queue(std::size_t capacity)
-        : capacity_(capacity) {
+thread_safe_queue<T>::thread_safe_queue() {
 }
 
 template<typename T>
 void thread_safe_queue<T>::enqueue(T item) {
     std::unique_lock<std::mutex> lock(mutex_);
-
-    auto not_overloaded = [this] { return queue_.size() < capacity_; };
-    overloaded_.wait(lock, not_overloaded); // if true, continue
-
     queue_.push(item);
     lock.unlock();
     empty_.notify_one();
@@ -46,5 +40,4 @@ void thread_safe_queue<T>::pop(T& item) {
     item = queue_.front();
     queue_.pop();
     lock.unlock();
-    overloaded_.notify_one();
 }
