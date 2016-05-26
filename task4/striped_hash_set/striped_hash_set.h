@@ -40,12 +40,12 @@ template <typename T, class H>
 striped_hash_set<T, H>::striped_hash_set(std::size_t num_stripes,
                                    int growth_factor,
                                    float load_factor)
-        : hash_table_(num_stripes * 10),
+        : hash_table_(num_stripes),
           mutex_array_(num_stripes),
           load_factor_(load_factor),
           growth_factor_(growth_factor),
           num_elements_(0),
-          hash_table_size_(num_stripes * 10) {
+          hash_table_size_(num_stripes) {
 }
 
 template <typename T, class H>
@@ -72,7 +72,7 @@ void striped_hash_set<T, H>::add(const T& element) {
     // check load factor once again to prevent from data race
     std::atomic<std::size_t> hash_table_size;
     hash_table_size.store(hash_table_size_.load());
-    if (hash_table_.size() != hash_table_size.load()) {
+    if (hash_table_size_.load() != hash_table_size.load()) {
         return;
     }
 
@@ -93,8 +93,8 @@ void striped_hash_set<T, H>::add(const T& element) {
 
 template <typename T, class H>
 void striped_hash_set<T, H>::rehash() {
-    std::vector<std::forward_list<T>> new_hash_table(
-            hash_table_size_.load() * growth_factor_);
+    std::vector<std::forward_list<T>> new_hash_table;
+    new_hash_table.resize(hash_table_size_.load() * growth_factor_);
     for (std::forward_list<T> bucket : hash_table_) {
         for (auto current : bucket) {
             int hash = hash_function_(current);
@@ -110,11 +110,7 @@ void striped_hash_set<T, H>::remove(const T& element) {
     int hash = hash_function_(element);
     std::unique_lock<std::shared_timed_mutex> lock(
             mutex_array_[hash % mutex_array_.size()]);
-    for (auto current : hash_table_[hash % hash_table_size_.load()]) {
-        if (current == element) {
-            hash_table_[hash % hash_table_size_.load()].remove(element);
-        }
-    }
+    hash_table_[hash % hash_table_size_.load()].remove(element);
 }
 
 template <typename T, class H>
