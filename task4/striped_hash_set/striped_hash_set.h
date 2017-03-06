@@ -4,6 +4,7 @@
 #include <shared_mutex>
 #include <atomic>
 #include <iostream>
+#include <stdexcept>
 
 const int DEFAULT_GROWTH_FACTOR = 2;
 const float DEFAULT_LOAD_FACTOR = 1.5;
@@ -34,38 +35,48 @@ private:
 
     H hash_function_;
     void rehash();
+    void push(const T& element, int hash);
 };
 
 template <typename T, class H>
 striped_hash_set<T, H>::striped_hash_set(std::size_t num_stripes,
-                                   int growth_factor,
-                                   float load_factor)
+                                         int growth_factor,
+                                         float load_factor)
         : hash_table_(num_stripes),
           mutex_array_(num_stripes),
           load_factor_(load_factor),
           growth_factor_(growth_factor),
           num_elements_(0),
           hash_table_size_(num_stripes) {
+    if (num_stripes < 1) {
+        throw std::invalid_argument("Number of stripes must be positive.");
+    }
+}
+
+template <typename T, class H>
+void striped_hash_set<T, H>::push(const T& element, int hash) {
+    for (auto current : hash_table_[hash % hash_table_size_.load()]) {
+        if (current == element) {
+            return;
+        }
+    }
+    hash_table_[hash % hash_table_size_.load()].push_front(element);
+    num_elements_.store(num_elements_ + 1);
 }
 
 template <typename T, class H>
 void striped_hash_set<T, H>::add(const T& element) {
     std::vector<std::unique_lock<std::shared_timed_mutex>> lock_array;
-    // lock the first mutex
+
     lock_array.emplace_back(mutex_array_[0]);
 
+    // insert without rehash
     int hash = hash_function_(element);
     if (num_elements_.load() / hash_table_size_.load() < load_factor_) {
         mutex_array_[0].unlock();
         std::unique_lock<std::shared_timed_mutex> lock(
                 mutex_array_[hash % mutex_array_.size()]);
-        for (auto current : hash_table_[hash % hash_table_size_.load()]) {
-            if (current == element) {
-                return;
-            }
-        }
-        hash_table_[hash % hash_table_size_.load()].push_front(element);
-        num_elements_.store(num_elements_ + 1);
+        push(element, hash);
         return;
     }
 
@@ -81,14 +92,7 @@ void striped_hash_set<T, H>::add(const T& element) {
         lock_array.emplace_back(mutex_array_[i]);
     }
     rehash();
-
-    for (auto current : hash_table_[hash % hash_table_size_.load()]) {
-        if (current == element) {
-            return;
-        }
-    }
-    hash_table_[hash % hash_table_size_.load()].push_front(element);
-    num_elements_.store(num_elements_ + 1);
+    push(element, hash);
 }
 
 template <typename T, class H>
